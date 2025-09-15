@@ -1,99 +1,212 @@
-## Twitter Sentiment Analysis
+## Twitter Sentiment Analysis — End‑to‑End, Modular, and Interactive
 
-Modular, reproducible sentiment analysis for tweets with a clean CLI, improved preprocessing, multiple model options, artifacts saving, and unit tests. Backward‑compatible with the original single‑file script.
+A modern, modular Twitter sentiment analysis project with:
+- Fast, configurable preprocessing (no external corpora)
+- Solid, extensible modeling options (linear, NB, streaming‑friendly)
+- A clean CLI for training, evaluation, prediction (offline + online)
+- An interactive Streamlit app for training, live monitoring, error analysis, and visualizations
+- Reproducible artifacts (pipelines, metrics, curves), and unit tests
+
+This README consolidates all developer and user guidance for the project.
 
 ---
 
-## Overview
+## Contents
+- Overview and Features
+- Project Structure
+- Setup and Requirements
+- Data Schema
+- Preprocessing (configurable)
+- Modeling Options and Feature Selection
+- Offline Training and Outputs
+- Online/Streaming Training
+- Streamlit App (interactive)
+- Resume Training and Re‑save Legacy Models
+- Testing
+- Troubleshooting
+- Roadmap
 
-- Preprocesses tweets with a fast regex tokenizer (lowercasing, <url>/<user> placeholders, hashtag stripping, elongated‑char normalization, simple contractions).
-- Vectorizes with TF‑IDF over word n‑grams (optional char n‑grams).
-- Trains configurable models: Naive Bayes, Logistic Regression, or Linear SVM.
-- Splits training data deterministically with stratify and a fixed seed.
-- Saves a trained pipeline, metrics (JSON), and figures (EDA + confusion matrices).
-- Includes small unit tests for core components.
+---
+
+## Overview and Features
+
+- Tokenization and normalization are handled by a configurable, self‑contained regex pipeline (no NLTK corpora required). Placeholders for `<url>` and `<user>`, hashtag handling, emoji/emoticon mapping, repeat‑char control, contractions, and optional negation scope.
+- Vectorization via TF‑IDF over word n‑grams (optional char n‑grams). Optional HashingVectorizer for streaming (fixed dimensionality).
+- Models: MultinomialNB, ComplementNB, Logistic Regression (L2/L1), LinearSVC, SGD (hinge/log), Passive‑Aggressive. Optional calibrated probabilities.
+- CLI: Train/evaluate (offline), predict (single text or CSV), and online/streaming training with partial_fit.
+- Streamlit app: Predict, train/evaluate, browse artifacts, threshold explorer, top‑features explorer, misclassification browser, offline training curve, and live training (background thread with auto‑refresh).
+- Artifacts: sklearn pipeline, metrics JSONs, EDA/confusion matrix figures, top features (when supported), training curves.
+- Unit tests: core preprocessing, data loading, metric sanity checks, and modeling sanity tests.
 
 ---
 
 ## Project Structure
 
-- `twitter_sentiment/` — package
-  - `data.py` — dataset loading, outputs directory management, EDA plots.
-  - `preprocess.py` — regex‑based normalization and tokenization.
-  - `model.py` — vectorizer and model builders; small default param grids.
-  - `evaluate.py` — metrics computation and confusion‑matrix plotting.
-  - `train.py` — CLI for training, validation, test evaluation, and saving artifacts.
-  - `predict.py` — CLI for inference from text or CSV.
-- `tests/` — unit tests for preprocessing, data loading, and metrics.
-- `requirements.txt` — runtime dependencies.
-- `sentanal.py` — legacy entry point delegating to `twitter_sentiment.train`.
-- `data/train.csv`, `data/test.csv` — example datasets (see Data Schema).
-- `outputs/` — generated artifacts (created on first run).
+- `twitter_sentiment/` — source package
+  - `preprocess.py` — Tokenizer + PreprocessorConfig; composable normalization.
+  - `model.py` — vectorizer builders (Count/Hashing + TF‑IDF), models, and grids.
+  - `data.py` — dataset IO, outputs directory creation, EDA plots.
+  - `evaluate.py` — metrics, confusion matrix saving, top features, loss calculation.
+  - `train.py` — CLI entry; offline and online training; resume; artifacts.
+  - `predict.py` — CLI inference on text/CSV.
+- `app/streamlit_app.py` — Streamlit app (predict, train/evaluate, artifacts, live training).
+- `tests/` — unit tests.
+- `data/` — place `train.csv`, `test.csv` here (preferred).
+- `outputs/` — default artifacts (created on first run).
 
 ---
 
-## Setup
+## Setup and Requirements
 
-- Python 3.9–3.11 recommended (works in your conda env `test_env`).
-- Install dependencies: `pip install -r requirements.txt` (or conda equivalents).
-- No NLTK/TextBlob corpora required (the tokenizer is self‑contained).
-- Headless environments: set `MPLCONFIGDIR` to a writable folder to silence font cache warnings, e.g. `.mplconfig`.
- - Data location: put `train.csv` and `test.csv` in `data/` (preferred) or project root. The CLI auto-detects `data/train.csv` and `data/test.csv` if present.
- - Git hygiene: ephemeral outputs and caches are ignored by default via `.gitignore` (e.g., `outputs*/`, `.mplconfig/`, `__pycache__/`, `.idea/`, `nltk_data/`). Keep only source and docs under version control.
-  - If such files were previously committed, untrack with e.g. `git rm -r --cached outputs .mplconfig __pycache__ .idea`.
+- Python 3.9–3.11 recommended; project validated in conda env `test_env`.
+- Install: `pip install -r requirements.txt` (includes pandas, numpy, scikit‑learn, matplotlib, seaborn, streamlit, plotly).
+- Headless environments: set `MPLCONFIGDIR` to writable dir (to silence font cache warnings):
+  - `export MPLCONFIGDIR=$(pwd)/.mplconfig`
+- Git hygiene: `.gitignore` excludes generated outputs, caches, IDE files. Untrack previously committed artifacts with, e.g., `git rm -r --cached outputs .mplconfig __pycache__ .idea`.
 
-Conda users
-- Use your prepared env: `conda run -n test_env ...`
-- Examples:
-  - `conda run -n test_env python -m unittest -v`
-  - `conda run -n test_env streamlit run app/streamlit_app.py`
-  - To silence Matplotlib cache warnings: `export MPLCONFIGDIR=$(pwd)/.mplconfig`
+Conda examples
+- `conda run -n test_env python -m unittest -v`
+- `conda run -n test_env streamlit run app/streamlit_app.py`
 
 ---
 
 ## Data Schema
 
-- Train CSV: columns `label` (0/1) and `tweet` (string) are required.
-- Test CSV: requires `tweet`; `label` is optional (if present, test metrics are reported).
+- Train CSV: `label` (0/1) and `tweet` (string) required.
+- Test CSV: `tweet` required; `label` optional (metrics computed if present).
+- Preferred location: `data/train.csv`, `data/test.csv` (auto‑detected by CLI/app).
 
 ---
 
-## Usage
+## Preprocessing (configurable)
 
-- Train and evaluate
+PreprocessorConfig (selected highlights):
+- `lowercase` (default True)
+- `max_repeat_char` (collapse long repeats)
+- `hashtag_policy`: `strip|keep|segment`
+- `replace_url`, `replace_user` (placeholders `<url>`, `<user>`)
+- `number_policy`: `keep|drop|token`
+- `emoji_policy`: `ignore|drop|map` + basic emoticon mapping
+- `contractions`: `none|default` or custom dict
+- `negation_scope`: integer to mark next N tokens with `_neg`
+
+CLI flags (examples):
+- `--no-lowercase`, `--max-repeat 3`, `--hashtag-policy strip`,
+- `--no-replace-url`, `--no-replace-user`,
+- `--number-policy drop`, `--emoji-policy ignore`, `--no-emoticons`,
+- `--contractions default`, `--negation-scope 0`
+
+Vectorizer options:
+- `--use-char-ngrams`, `--word-ngrams 1,2`, `--char-ngrams 3,5`
+- `--use-hashing` (HashingVectorizer), `--hashing-features 1048576`
+
+---
+
+## Modeling Options and Feature Selection
+
+Models:
+- `nb` (MultinomialNB), `cnb` (ComplementNB)
+- `logreg` (L2), `logreg_l1` (L1/liblinear)
+- `linearsvm` (LinearSVC)
+- `sgd` (log_loss), `sgd_hinge`, `pa` (PassiveAggressive)
+
+Extras:
+- `--select-k N` — optional `SelectKBest(chi²)` feature selection (cap features for speed/stability).
+- `--calibrate-probabilities` — wraps model with `CalibratedClassifierCV` (for probabilities and threshold tuning).
+
+Notes:
+- Skip grid search when calibrating probabilities (avoids nested CV).
+- For very large `select_k`, prefer smaller values or linear models without calibration.
+
+---
+
+## Offline Training and Outputs
+
+Train and evaluate (offline):
 ```
 python -m twitter_sentiment.train \
   --train data/train.csv \
   --test data/test.csv \
   --outputs outputs \
-  --model nb            # or: logreg, linearsvm
-# optional flags:
-# --use-char-ngrams         # add char n-grams (3–5)
-# --word-ngrams 1,2         # set word n-gram range (default 1,2)
-# --no-grid                 # disable small GridSearchCV
-# --balance downsample      # class balancing: none|downsample|upsample
-# --calibrate-threshold     # tune decision threshold on validation
-# --test-size 0.2 --seed 42 # control split and seed
+  --model nb              # or: cnb, logreg, logreg_l1, linearsvm, sgd, sgd_hinge, pa \
+  --no-grid               # optional: disable grid search
 ```
 
-- Predict with a saved model
-```
-python -m twitter_sentiment.predict --model outputs/artifacts/model_pipeline.joblib --text "I love this!"
-# or batch from CSV with a 'tweet' column
-python -m twitter_sentiment.predict --model outputs/artifacts/model_pipeline.joblib --csv data/test.csv --out-csv preds.csv
-```
+Logging and progress:
+- `--log-level INFO|DEBUG|...` to control verbosity (default INFO).
+- `--no-progress` disables extra verbosity (incl. tqdm where applicable).
+  - Grid search prints fold/candidate progress when progress is enabled.
 
-Notes
-- If your `test.csv` contains a `label` column with missing values, metrics are computed on the labeled subset; predictions are saved for all rows.
-- Legacy artifacts pickled with a `src.*` module may fail to load via the raw CLI; the Streamlit app includes a compatibility shim and can load them. You can then re-save a fresh pipeline for future use.
+Key outputs under `outputs/`:
+- `artifacts/model_pipeline.joblib` — trained sklearn pipeline
+- `reports/metrics.json` — validation metrics (and test metrics if labels exist)
+- `reports/val_predictions.csv`, `reports/test_predictions.csv`
+- `reports/top_features.json` — top positive/negative tokens (linear/NB models)
+- `reports/training_curve.json` — offline loss curves (train/val vs fraction)
+- `figures/` — EDA plots + confusion matrices
+
+Sample figures (paths after a run):
+- `![Label counts](outputs/figures/label_counts.png)`
+- `![Confusion matrix (val)](outputs/figures/confusion_matrix_val.png)`
 
 ---
 
-## Outputs
+## Online / Streaming Training
 
-- `outputs/artifacts/model_pipeline.joblib` — trained sklearn pipeline.
-- `outputs/reports/metrics.json` — validation metrics (and test metrics if labels exist).
-- `outputs/figures/` — EDA plots (`barplot_label_length.png`, `label_counts.png`) and confusion matrices (`confusion_matrix_*.png`).
+Incremental training with `partial_fit` and chunked CSV reading.
+
+CLI example:
+```
+python -m twitter_sentiment.train \
+  --online \
+  --train data/train.csv \
+  --outputs outputs_live \
+  --model nb \           # or: cnb, sgd, sgd_hinge, pa
+  --batch-size 4096 \     # chunksize for streaming
+  --epochs 1 \            # passes over data
+  --eval-every 1 \        # evaluate validation every N batches
+  --checkpoint-every 5    # save pipeline every N batches
+# streaming‑friendly vectorizer:
+# --use-hashing --hashing-features 1048576
+```
+
+Outputs under `outputs_live/`:
+- `artifacts/model_pipeline.joblib` — periodically checkpointed
+- `reports/metrics_online.json` — rolling metrics + `train_curve` (samples seen vs loss)
+
+Progress bars:
+- Online mode displays a tqdm bar over seen samples (per epoch) with loss and periodic validation metrics in the postfix.
+- Disable with `--no-progress`.
+
+---
+
+## Streamlit App (interactive)
+
+Run locally:
+- `pip install -r requirements.txt`
+- `streamlit run app/streamlit_app.py`
+
+Features:
+- Predict (single text + CSV). Re‑save loaded model to new outputs dir.
+- Train/Evaluate (offline): configure model, n‑grams, preprocessing, selection, calibration, and Resume from checkpoint.
+- Artifacts: browse metrics.json, predictions, figures; interactive threshold explorer; top‑features explorer; misclassification browser; offline training loss curves.
+- Live Training (streaming): background thread with Start/Resume and Stop; hashing option; auto‑refresh metrics (state‑preserving); live confusion matrix and loss curve.
+
+Tips:
+- The app uses `width='stretch'` for charts/images to avoid deprecation warnings.
+- If Matplotlib font cache warnings appear, set `MPLCONFIGDIR=$(pwd)/.mplconfig`.
+
+---
+
+## Resume Training and Re‑save Legacy Models
+
+Resume (offline):
+- Add `--resume` (CLI) or enable “Resume from checkpoint” in the app.
+- Works best with partial_fit models (NB/SGD/PA); others refit.
+
+Re‑save legacy models:
+- Predict tab → “Re‑save Loaded Model” to write the currently loaded pipeline to `target/outputs/artifacts/model_pipeline.joblib`.
+- Legacy models from older layouts are supported by a small shim that maps `src.preprocess` → `twitter_sentiment.preprocess` during load.
 
 ---
 
@@ -111,80 +224,17 @@ conda run -n test_env python -m unittest discover -s tests -p "test_*.py" -v
 
 ## Troubleshooting
 
-- Font cache warnings: set `MPLCONFIGDIR` to a writable path, e.g. `export MPLCONFIGDIR=$(pwd)/.mplconfig`.
-- If `test.csv` lacks labels, only predictions are produced (no test metrics).
+- Matplotlib font cache warnings: set `MPLCONFIGDIR=$(pwd)/.mplconfig`.
+- Legacy artifacts: load in the app and re‑save; or add a small `sys.modules['src.preprocess']` shim before joblib.load.
+- Sklearn warnings: with a custom tokenizer, scikit‑learn notes `token_pattern` is ignored — expected and safe.
+- For best Streamlit performance, consider installing `watchdog`.
 
 ---
 
-## Current Status
+## Roadmap (high‑level)
 
-- Implemented
-  - Correct metrics ordering (y_true, y_pred) and macro‑F1 reporting.
-  - Deterministic train/val split with `stratify` and `random_state`.
-  - Self‑contained, fast preprocessing (no external corpora).
-  - Word n‑grams (1–2 default) and optional char n‑grams (3–5).
-  - Models: NB (default), Logistic Regression, Linear SVM; small optional grid search.
-  - Saved artifacts and figures; metrics in JSON; simple unit tests.
-
-- Known limitations
-  - Class imbalance handling beyond linear models: NB not reweighted; no sampling yet.
-  - Hyperparameter search is intentionally small; no cross‑validated model selection across vectorizers.
-  - No experiment tracker; logging is minimal; no CLI subcommands.
-  - No CI pipeline or pre‑commit hooks.
-  - Dataset documentation and bias considerations are minimal.
-
----
-
-## Roadmap
-
-1) Evaluation & Reporting (short term)
-- Expand metrics JSON: add per‑class precision/recall/F1 explicitly and ROC‑AUC (when applicable).
-- Save validation predictions and probabilities to `outputs/reports/val_predictions.csv`.
-- Add option to save test predictions to `outputs/reports/test_predictions.csv`.
-
-2) Modeling & Imbalance (short term)
-- Add class weighting or calibrated thresholds for NB; optionally integrate simple resampling strategies (e.g., class‑balanced subsampling) behind a flag.
-- Broaden hyperparameter grids and add cross‑validation for model selection (limited, time‑boxed).
-
-3) Preprocessing (short term)
-- Optional emoji and emoticon normalization tables; configurable placeholder policy; configurable repeat‑char limit.
-
-4) Developer Experience (medium term)
-- Introduce structured logging (Python `logging`) with `--log-level` and file output.
-- Add a `config.yaml` option and CLI override strategy; persist resolved config next to artifacts.
-- Provide `requirements-dev.txt` and pre‑commit hooks (`ruff`, `black`, `isort`).
-- Set up GitHub Actions CI to run tests and lint on pushes/PRs.
-
-5) Streamlit App (medium term)
-- Build a Streamlit UI to:
-  - Enter text and see predictions + class probabilities
-  - Upload a CSV and download predictions
-  - Visualize EDA and confusion matrices
-  - Configure basic options (model, n‑grams) and run inference
-
-6) Documentation & Safety (ongoing)
-- Document dataset provenance, licensing, and known biases; add usage limitations.
-- Expand README with examples, tips for large‑scale training, and performance notes.
-
-Milestones
-- v0.2.0: Improved metrics + saved predictions + expanded grids + logging.
-- v0.3.0: CI + pre‑commit + config file + imbalance handling options.
-- v0.4.0: Streamlit app for interactive demo and simple hosting.
-
----
-
-## Streamlit App
-
-- Run locally:
-  - `pip install -r requirements.txt`
-  - `streamlit run app/streamlit_app.py`
-- Features:
-  - Predict on single text or batch CSV using a saved pipeline
-  - Train/evaluate from the UI with model, n‑grams, balancing and threshold options
-  - Browse artifacts: metrics.json, predictions CSVs, EDA and confusion matrices
-  - Auto-detects data in `data/` if present; otherwise uses project root
-  - Defaults to saving/exploring artifacts under `outputs_streamlit/` (falls back to `outputs/`)
-
-Tips
-- If you see Matplotlib font cache warnings, set `MPLCONFIGDIR=$(pwd)/.mplconfig` and rerun.
-- Loading legacy models referencing `src.preprocess` is supported in-app via a shim; if a model still fails, click Rerun or Clear cache and reselect the file.
+- Evaluation & Reporting: expand metrics JSON, save more diagnostics.
+- Modeling: richer grids, cross‑validation, imbalance strategies.
+- Preprocessing: optional emoji tables, configurable placeholder/limits.
+- Developer experience: logging, config files, pre‑commit, CI.
+- App: deeper error analysis, richer model introspection, export utilities.

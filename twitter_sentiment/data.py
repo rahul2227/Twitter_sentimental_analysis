@@ -46,7 +46,7 @@ def save_eda_plots(train_df: pd.DataFrame, out_dir: str | os.PathLike) -> None:
     tmp['length'] = tmp['tweet'].astype(str).map(len)
 
     plt.figure(figsize=(7, 4))
-    ax = sns.barplot(x='label', y='length', data=tmp, palette='PRGn')
+    ax = sns.barplot(x='label', y='length', data=tmp, hue='label', palette='PRGn', legend=False)
     ax.set_title('Average Tweet Length vs Label')
     ax.set_xlabel('Label')
     ax.set_ylabel('Average Length')
@@ -66,4 +66,3 @@ def save_eda_plots(train_df: pd.DataFrame, out_dir: str | os.PathLike) -> None:
     plt.tight_layout()
     plt.savefig(out / 'label_counts.png', dpi=150)
     plt.close()
-
