@@ -1,0 +1,30 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# OS files
+.DS_Store
+
+# IDE/editor
+.idea/
+.vscode/
+
+# Matplotlib cache (font cache etc.)
+.mplconfig/
+app/.mplconfig/
+
+# Experiment outputs and artifacts
+outputs/
+outputs_*/
+outputs_streamlit/
+
+# Local data caches not required for this project
+nltk_data/
+
+# Test/coverage caches
+.pytest_cache/
+.mypy_cache/
+coverage.xml
+.coverage*
+
