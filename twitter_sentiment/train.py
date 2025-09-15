@@ -462,6 +462,7 @@ def train_and_evaluate(
             'val_loss': [float(x) for x in val_losses],
         }
         (reports_dir / 'training_curve.json').write_text(json.dumps(curve, indent=2))
+        logging.getLogger("twitter_sentiment").info("Saved offline training curve → %s", str(reports_dir / 'training_curve.json'))
     except Exception:
         pass
 

@@ -1,7 +1,7 @@
 import io
 import json
 import os
-from datetime import time
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -19,7 +19,7 @@ except ModuleNotFoundError:  # add repo root to sys.path and retry
     _ROOT = Path(__file__).resolve().parents[1]
     if str(_ROOT) not in _sys.path:
         _sys.path.insert(0, str(_ROOT))
-    from twitter_sentiment.train import train_and_evaluate
+    from twitter_sentiment.train import train_and_evaluate, online_train_and_evaluate
     from twitter_sentiment.evaluate import get_prediction_scores
 
 
@@ -327,18 +327,30 @@ def render_artifacts_tab():
                     fig = go.Figure(data=go.Heatmap(z=cm, x=['Pred 0', 'Pred 1'], y=['True 0', 'True 1'], colorscale='Blues', showscale=True))
                     fig.update_layout(height=350, margin=dict(l=20, r=20, t=30, b=20))
                     st.plotly_chart(fig, width='stretch')
-                # Training curve (live)
-                if HAS_PLOTLY and 'train_curve' in mj and isinstance(mj['train_curve'], list) and mj['train_curve']:
-                    st.markdown('##### Live Training Loss Curve')
-                    dfc = pd.DataFrame(mj['train_curve'])
-                    figlc = px.line(dfc, x='step', y='loss')
-                    figlc.update_layout(yaxis_title='Loss', xaxis_title='Samples seen')
-                    st.plotly_chart(figlc, width='stretch')
-                    # Score histogram
-                    fig2 = px.histogram(dfv, x='score', nbins=40, color=(dfv['y_true'].astype(str) if 'y_true' in dfv.columns else None), title='Validation scores distribution')
-                    st.plotly_chart(fig2, width='stretch')
             except Exception as e:
                 st.info(f'Interactive threshold explorer unavailable: {e}')
+
+    # Offline training curve (if present)
+    curve_path = reports_dir / 'training_curve.json'
+    if curve_path.exists():
+        try:
+            st.markdown('##### Offline Training Curve')
+            curve = json.loads(curve_path.read_text())
+            dfc = pd.DataFrame({
+                'fraction': curve.get('fractions', []),
+                'train_loss': curve.get('train_loss', []),
+                'val_loss': curve.get('val_loss', []),
+            })
+            if HAS_PLOTLY:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=dfc['fraction'], y=dfc['train_loss'], mode='lines+markers', name='train'))
+                fig.add_trace(go.Scatter(x=dfc['fraction'], y=dfc['val_loss'], mode='lines+markers', name='val'))
+                fig.update_layout(xaxis_title='Train fraction', yaxis_title='Loss', height=350, margin=dict(l=20, r=20, t=30, b=20))
+                st.plotly_chart(fig, width='stretch')
+            else:
+                st.line_chart(dfc.set_index('fraction'))
+        except Exception as e:
+            st.info(f'Offline training curve unavailable: {e}')
 
     # Top features (interactive)
     tf_path = reports_dir / 'top_features.json'
@@ -533,6 +545,13 @@ def main():
                     fig = go.Figure(data=go.Heatmap(z=cm, x=['Pred 0', 'Pred 1'], y=['True 0', 'True 1'], colorscale='Blues'))
                     fig.update_layout(height=300, margin=dict(l=20, r=20, t=30, b=20))
                     st.plotly_chart(fig, width='stretch')
+                # Live training loss curve (if provided)
+                if HAS_PLOTLY and isinstance(mj.get('train_curve'), list) and mj['train_curve']:
+                    st.markdown('##### Live Training Loss Curve')
+                    dfc = pd.DataFrame(mj['train_curve'])
+                    figlc = px.line(dfc, x='step', y='loss')
+                    figlc.update_layout(yaxis_title='Loss', xaxis_title='Samples seen', height=300, margin=dict(l=20, r=20, t=30, b=20))
+                    st.plotly_chart(figlc, width='stretch')
             except Exception as e:
                 st.info(f'Live metrics not available: {e}')
 
